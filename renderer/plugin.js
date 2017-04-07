@@ -8,6 +8,7 @@ Plugin.extend({
     _uuid: undefined,
     _serviceName: '_my-service._tcp.',
     _hostName: 'my host',
+    _clients: [],
     getUUID: function(){
         return this.uuid;
     },
@@ -48,22 +49,33 @@ Plugin.extend({
                         },
                         // WebSocket Connection handlers
                         'onOpen' : function(conn) {
-                            console.log('org.ekstep.plugin.peerplay WS: CONNECT '+conn.remoteAddr);
-                            console.log('org.ekstep.plugin.peerplay WS: SENDING WELCOME to: '+conn.uuid);
-                            instance.uuid = conn.uuid;
-                            wsserver.send(conn, JSON.stringify({
-                                type: "hello",
-                                data: {
-                                    uuid: conn.uuid
-                                }
-                            }));
-                            instance._serverState.scores[conn.uuid]={};
-                            wsserver.send(conn, JSON.stringify({
-                                type: "state",
-                                data: instance._serverState
-                            }));
-                            console.log('org.ekstep.plugin.peerplay WS: SENT WELCOME KIT');
-
+                            if(instance._clients.length<=2){
+                                console.log('org.ekstep.plugin.peerplay WS: CONNECT '+conn.remoteAddr);
+                                console.log('org.ekstep.plugin.peerplay WS: SENDING WELCOME to: '+conn.uuid);
+                                instance.uuid = conn.uuid;
+                                wsserver.send(conn, JSON.stringify({
+                                    type: "hello",
+                                    data: {
+                                        uuid: conn.uuid
+                                    }
+                                }));
+                                instance._serverState.scores[conn.uuid]={};
+                                wsserver.send(conn, JSON.stringify({
+                                    type: "state",
+                                    data: instance._serverState
+                                }));
+                                console.log('org.ekstep.plugin.peerplay WS: SENT WELCOME KIT');
+                                instance._clients.push(conn);
+                            } else {
+                                wsserver.close(conn, 4000, 'only 2 max clients!');
+                            }
+                            if(instance._clients.length===2){
+                                instance._clients.map(function(conn){
+                                    wsserver.send(conn, JSON.stringify({
+                                        type: "start"
+                                    }));
+                                });
+                            }
                         },
                         'onMessage' : function(conn, msg) {
                             console.log('org.ekstep.plugin.peerplay WS: MSG '+ msg);
@@ -103,7 +115,13 @@ Plugin.extend({
                         },
                         'onClose' : function(conn, code, reason) {
                             EventBus.dispatch('PEERPLAY_SERVER_ONCLOSE',instance,conn,code,reason);
-                            console.log('org.ekstep.plugin.peerplay WS: DISCONNECT ' + code + reason);
+                            console.log('org.ekstep.plugin.peerplay WS: DISCONNECT ' + JSON.stringify(conn) + code + reason);
+                            instance._clients=instance._clients.filter(function(el){
+                                return el.uuid!=conn.uuid;
+                            });
+                            if(instance._clients.length===0){
+                                instance.cleanup();
+                            }
                         }
                     },
                     function onStart(addr, port) {
@@ -166,8 +184,6 @@ Plugin.extend({
                 } else {
                     zeroconf.unwatch(instance.getServiceName(), 'local.');
                     zeroconf.watch(instance.getServiceName(), 'local.', function (result) {
-                        console.log('org.ekstep.plugin.peerplay DEBUG instance '+typeof(instance));
-                        console.log('org.ekstep.plugin.peerplay DEBUG i '+typeof(i));
                         var
                             service = result.service,
                             hostname,
@@ -194,9 +210,8 @@ Plugin.extend({
                                     type: "hello",
                                     msg: "greetings from client"
                                 }));
-                                console.debug('org.ekstep.plugin.peerplay CONNECTION: '+JSON.stringify(instance._connection));
                                 EkstepRendererAPI.dispatchEvent('com.github.steotia.peerplay.core.self.connect',instance._connection);
-                                console.log('org.ekstep.plugin.peerplay CLIENT: welcome sent', url);
+                                console.log('org.ekstep.plugin.peerplay CLIENT: welcome sent ' + url);
                             };
                             instance._connection.onmessage = function (event) {
                                 console.log('org.ekstep.plugin.peerplay CLIENT: got message >'+JSON.stringify(event.data)+'<');
@@ -206,8 +221,11 @@ Plugin.extend({
                                         console.log('org.ekstep.plugin.peerplay CLIENT: set scores >'+JSON.stringify(_event.scores)+'<');
                                         EkstepRendererAPI.dispatchEvent('com.github.steotia.peerplay.core.state.update',instance,_event);
                                     } else if(_event.type=="hello"){
-                                        console.log('org.ekstep.plugin.peerplay CLIENT: get uuid '+JSON.stringify());
+                                        console.log('org.ekstep.plugin.peerplay CLIENT: get uuid '+JSON.stringify(_event));
                                         EkstepRendererAPI.dispatchEvent('com.github.steotia.peerplay.core.state.hello',instance,_event);
+                                    } else if(_event.type=="start") {
+                                        console.log('org.ekstep.plugin.peerplay CLIENT: start '+JSON.stringify(_event));
+                                        EkstepRendererAPI.dispatchEvent('com.github.steotia.peerplay.core.state.start',instance,_event);
                                     }
                                 }
                             };
@@ -254,6 +272,10 @@ Plugin.extend({
             EventBus.addEventListener('com.github.steotia.peerplay.core.cleanup', function(){
                 instance.cleanup();
             }, instance._theme);
+
+            EventBus.addEventListener('com.github.steotia.peerplay.core.state.stop',function(){
+                instance._connection.close();
+            });
         }
 
 });
