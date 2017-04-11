@@ -28,6 +28,15 @@
         }
     },
     "renderer": {
-        "main": "renderer/plugin.js"
+        "main": "renderer/plugin.js",
+        "dependencies": [
+            {
+                "id": "com.github.steotia.wrapper.state-machine",
+                "src": "../com.github.steotia.wrapper.state-machine-1.0/renderer/plugin.js",
+                "type": "plugin",
+                "preload": true,
+                "ver": "1.0"
+            }
+        ]
     }
 }
